@@ -63,6 +63,12 @@ export function generateComment(matchDescription, style) {
   return complete(system, `Данные матча:\n\n${matchDescription}`);
 }
 
+/** Сборка предметов под пики по build-prompt.txt. */
+export function generateBuild(description, style) {
+  const system = loadPrompt(config.buildPromptFile, { style, max_chars: String(config.maxChars) });
+  return complete(system, `Данные драфта:\n\n${description}`);
+}
+
 /** Шутка про target по joke-prompt.txt; recentJokes — чтобы модель не повторялась. */
 export function generateJoke(target, style, recentJokes) {
   const system = loadPrompt(config.jokePromptFile, {

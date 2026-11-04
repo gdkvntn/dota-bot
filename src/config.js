@@ -65,6 +65,7 @@ export const config = {
   stateFile: str('STATE_FILE', './data/state.json'),
   promptFile: str('PROMPT_FILE', './prompt.txt'),
   jokePromptFile: str('JOKE_PROMPT_FILE', './joke-prompt.txt'),
+  buildPromptFile: str('BUILD_PROMPT_FILE', './build-prompt.txt'),
 };
 
 export function requireConfig(...keys) {

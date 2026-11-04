@@ -72,6 +72,8 @@ export async function getParsedMatch(matchId) {
 // --- Справочники: id героя/предмета → название. Грузятся один раз при старте ---
 
 const heroesById = {};
+const heroInfoById = {}; // id → { id, name, attr, attack, roles }
+const heroList = []; // все герои: { id, name, norm }
 const heroesByNpc = {}; // 'npc_dota_hero_pudge' → 'Pudge'
 const itemsById = {};
 const itemsByKey = {}; // 'blink' → { name: 'Blink Dagger', cost: 2250 }
@@ -85,6 +87,14 @@ export async function loadConstants() {
 
   for (const [id, hero] of Object.entries(heroes)) {
     heroesById[id] = hero.localized_name;
+    heroInfoById[id] = {
+      id: Number(id),
+      name: hero.localized_name,
+      attr: hero.primary_attr,
+      attack: hero.attack_type,
+      roles: hero.roles || [],
+    };
+    heroList.push({ id: Number(id), name: hero.localized_name, norm: normalizeName(hero.localized_name) });
     heroesByNpc[hero.name] = hero.localized_name;
   }
   for (const [key, item] of Object.entries(items)) {
@@ -99,3 +109,20 @@ export const heroName = (id) => heroesById[id] || `герой #${id}`;
 export const heroByNpc = (npc) => heroesByNpc[npc] || null;
 export const itemName = (id) => (id ? itemsById[id] || null : null);
 export const itemByKey = (key) => itemsByKey[key] || null;
+
+// 'Anti-Mage' → 'antimage': для поиска героя по введённому тексту
+export const normalizeName = (text) => String(text).toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+export const allHeroes = () => heroList;
+export const heroInfo = (id) => heroInfoById[id] || null;
+
+// Популярные предметы героя по этапам игры; кэш на 6 часов, чтобы не дёргать API лишний раз
+const POPULARITY_TTL_MS = 6 * 3_600_000;
+const popularityCache = new Map();
+
+export async function getItemPopularity(heroId) {
+  const cached = popularityCache.get(heroId);
+  if (cached && Date.now() - cached.at < POPULARITY_TTL_MS) return cached.data;
+  const data = await request(`/heroes/${heroId}/itemPopularity`);
+  popularityCache.set(heroId, { at: Date.now(), data });
+  return data;
+}

@@ -24,7 +24,7 @@ export async function makeReport(matchId, tracked, { match = null, style = confi
 }
 
 // Режет длинный текст на куски до 2000 символов, стараясь не рвать абзацы
-function splitMessage(text) {
+export function splitMessage(text) {
   const parts = [];
   let rest = text.trim();
   while (rest.length > DISCORD_LIMIT) {

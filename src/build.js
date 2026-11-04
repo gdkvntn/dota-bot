@@ -1,0 +1,263 @@
+// Команда /сборка: пользователь вводит героев своей команды и врагов,
+// бот подтягивает популярные предметы героев и просит модель накидать сборку под драфт.
+import { MessageFlags, SlashCommandBuilder } from 'discord.js';
+import { config } from './config.js';
+import { allHeroes, getItemPopularity, heroInfo, itemByKey, itemName, normalizeName } from './opendota.js';
+import { generateBuild } from './llm.js';
+import { splitMessage } from './report.js';
+import { resolveStyle, STYLES } from './styles.js';
+import * as state from './state.js';
+
+const MAX_TEAM = 5;
+const MAX_CHOICES = 25; // лимит Discord на подсказки автодополнения
+
+// Сокращения героев, которые игроки реально пишут. Ключи — в нижнем регистре, без пробелов и знаков.
+// Значение — название героя (как в игре). Пополняйте под свою компанию.
+const ALIASES = {
+  wk: 'Wraith King', sf: 'Shadow Fiend', am: 'Anti-Mage', pa: 'Phantom Assassin', tb: 'Terrorblade',
+  qop: 'Queen of Pain', np: "Nature's Prophet", ck: 'Chaos Knight', lc: 'Legion Commander',
+  ss: 'Shadow Shaman', ww: 'Winter Wyvern', void: 'Faceless Void', nec: 'Necrophos', necr: 'Necrophos',
+  bs: 'Bloodseeker', es: 'Earthshaker', dk: 'Dragon Knight', ta: 'Templar Assassin', bh: 'Bounty Hunter',
+  naix: 'Lifestealer', dp: 'Death Prophet', инвокер: 'Invoker', инво: 'Invoker', пудж: 'Pudge',
+  некр: 'Necrophos', некрофос: 'Necrophos', акс: 'Axe', лион: 'Lion', джагг: 'Juggernaut',
+  джаггернаут: 'Juggernaut', свен: 'Sven', рики: 'Riki', антимаг: 'Anti-Mage',
+};
+
+/** Ошибка, текст которой безопасно показать пользователю. */
+export class UserError extends Error {}
+
+const levenshtein = (a, b) => {
+  const row = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    let prev = row[0];
+    row[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const tmp = row[j];
+      row[j] = Math.min(row[j] + 1, row[j - 1] + 1, prev + (a[i - 1] === b[j - 1] ? 0 : 1));
+      prev = tmp;
+    }
+  }
+  return row[b.length];
+};
+
+/** Находит героя по введённому тексту: { hero } или { error }. */
+export function resolveHero(query) {
+  const heroes = allHeroes();
+  let q = normalizeName(query);
+  if (!q) return { error: 'Пустое название героя.' };
+  if (ALIASES[q]) q = normalizeName(ALIASES[q]);
+
+  const exact = heroes.find((h) => h.norm === q);
+  if (exact) return { hero: exact };
+
+  const starts = heroes.filter((h) => h.norm.startsWith(q));
+  if (starts.length === 1) return { hero: starts[0] };
+  if (starts.length > 1) {
+    return { error: `«${query}» — это кто? Подходят: ${starts.slice(0, 5).map((h) => h.name).join(', ')}. Напиши точнее.` };
+  }
+
+  const includes = heroes.filter((h) => h.norm.includes(q));
+  if (includes.length === 1) return { hero: includes[0] };
+
+  // Опечатка: ближайший герой не дальше чем на 2 правки
+  if (q.length >= 4) {
+    const near = heroes
+      .map((h) => ({ h, d: levenshtein(q, h.norm) }))
+      .filter(({ d }) => d <= 2)
+      .sort((a, b) => a.d - b.d);
+    if (near.length) return { hero: near[0].h };
+  }
+  return { error: `Не нашёл героя «${query}». Проверь написание или используй подсказки при вводе.` };
+}
+
+/**
+ * Разбирает «Антон=Invoker, Pudge, Axe» в [{ who, hero }].
+ * who — имя игрока (только если allowNames), hero — { id, name }.
+ */
+export function parseTeam(raw, label, { allowNames }) {
+  const entries = (raw || '').split(',').map((s) => s.trim()).filter(Boolean);
+  if (entries.length > MAX_TEAM) throw new UserError(`В поле «${label}» героев больше пяти.`);
+  return entries.map((entry) => {
+    const named = allowNames ? entry.match(/^([^=:]+)[=:](.+)$/) : null;
+    const who = named ? named[1].trim() : null;
+    const result = resolveHero(named ? named[2] : entry);
+    if (result.error) throw new UserError(result.error);
+    return { who, hero: result.hero };
+  });
+}
+
+// --- Описание для модели ---
+
+const PHASES = [
+  ['start_game_items', 'старт', 6],
+  ['early_game_items', 'ранняя игра', 5],
+  ['mid_game_items', 'середина', 5],
+  ['late_game_items', 'поздняя игра', 5],
+];
+const SKIP_ITEMS = /^(town portal scroll|recipe)/i;
+
+// Ключ предмета из ответа OpenDota (id или внутреннее имя) → читаемое название
+function itemLabel(key) {
+  const label = /^\d+$/.test(key) ? itemName(key) : itemByKey(key)?.name ?? key;
+  return label || null;
+}
+
+function topItems(phase, limit) {
+  return Object.entries(phase || {})
+    .sort((a, b) => b[1] - a[1])
+    .map(([key]) => itemLabel(key))
+    .filter((label) => label && !SKIP_ITEMS.test(label))
+    .slice(0, limit);
+}
+
+function findPlayer(who) {
+  if (!who) return null;
+  const n = normalizeName(who);
+  return config.players.find((p) => normalizeName(p.name) === n || normalizeName(p.nick) === n) ?? null;
+}
+
+// «на этом герое: 5 игр, 2 победы, в среднем 8.0 смертей» — из накопленной истории
+function playerHeroLine(player, heroName) {
+  const games = state.getHistory(player.id).filter((m) => m.hero === heroName);
+  if (!games.length) return 'в истории бота на этом герое игр нет';
+  const wins = games.filter((m) => m.win).length;
+  const deaths = (games.reduce((sum, m) => sum + m.deaths, 0) / games.length).toFixed(1);
+  return `в истории на этом герое: ${games.length} игр, побед ${wins}, в среднем ${deaths} смертей`;
+}
+
+async function allyBlock({ who, hero }) {
+  const player = findPlayer(who);
+  const label = player ? player.name : who || 'Союзник';
+  const info = heroInfo(hero.id);
+  const lines = [`- ${label} — ${hero.name} (${[info?.attack, info?.attr, info?.roles.join('/')].filter(Boolean).join(', ')})`];
+  if (player) lines.push(`  ${playerHeroLine(player, hero.name)}`);
+
+  try {
+    const popularity = await getItemPopularity(hero.id);
+    for (const [key, title, limit] of PHASES) {
+      const items = topItems(popularity[key], limit);
+      if (items.length) lines.push(`  Популярные предметы, ${title}: ${items.join(', ')}`);
+    }
+  } catch (err) {
+    console.warn(`Нет данных о предметах ${hero.name}:`, err.message);
+    lines.push('  Данных о популярных предметах получить не удалось');
+  }
+  return lines;
+}
+
+function enemyBlock(enemies) {
+  if (!enemies.length) return [];
+  const infos = enemies.map((e) => heroInfo(e.hero.id));
+  const count = (role) => infos.filter((i) => i?.roles.includes(role)).length;
+  const attr = (a) => infos.filter((i) => i?.attr === a).length;
+
+  const lines = enemies.map((e, i) => {
+    const info = infos[i];
+    return `- ${e.hero.name} (${[info?.attack, info?.attr, info?.roles.join('/')].filter(Boolean).join(', ')})`;
+  });
+  lines.push(
+    `Сводка по врагам (посчитано кодом; героев: ${enemies.length}): дизейблеров ${count('Disabler')}, побегов ${count('Escape')}, ` +
+      `нюкеров ${count('Nuker')}, инициаторов ${count('Initiator')}, керри ${count('Carry')}, ` +
+      `ренжей ${infos.filter((i) => i?.attack === 'Ranged').length} из ${enemies.length}; ` +
+      `атрибуты: str ${attr('str')}, agi ${attr('agi')}, int ${attr('int')}, универсалов ${attr('all')}`,
+  );
+  return lines;
+}
+
+async function describeDraft(ours, enemies) {
+  const allies = (await Promise.all(ours.map(allyBlock))).flat();
+  const foes = enemyBlock(enemies);
+  return [
+    'Наша команда (по этим героям нужна сборка):',
+    ...allies,
+    '',
+    foes.length ? 'Враги:' : 'Враги: пока не известны (драфт идёт), сборку давай без привязки к вражескому составу.',
+    ...foes,
+  ].join('\n');
+}
+
+/** Описание драфта → ответ модели. Возвращает { text, model, description }. */
+export async function makeBuild(ours, enemies, styleSetting = config.style) {
+  const description = await describeDraft(ours, enemies);
+  const style = resolveStyle(styleSetting);
+  const { text, model } = await generateBuild(description, style.text);
+  console.log(`/сборка: ответ от ${model}, стиль ${style.key}, ${text.length} симв.`);
+  return { text, model, description };
+}
+
+// --- Discord ---
+
+const styleChoices = ['random', ...Object.keys(STYLES)].map((key) => ({ name: key, value: key }));
+
+export const buildCommand = new SlashCommandBuilder()
+  .setName('сборка')
+  .setDescription('Накидать сборку по пикам')
+  .addStringOption((o) =>
+    o
+      .setName('мои')
+      .setDescription('Герои вашей команды через запятую. Можно с именем: Антон=Invoker, Pudge')
+      .setRequired(true)
+      .setAutocomplete(true),
+  )
+  .addStringOption((o) =>
+    o.setName('враги').setDescription('Герои противников через запятую (можно неполный драфт)').setAutocomplete(true),
+  )
+  .addStringOption((o) =>
+    o.setName('style').setDescription('Стиль комментария (по умолчанию — из настроек)').addChoices(...styleChoices),
+  );
+
+export async function handleBuildCommand(interaction) {
+  let ours;
+  let enemies;
+  try {
+    ours = parseTeam(interaction.options.getString('мои', true), 'мои', { allowNames: true });
+    enemies = parseTeam(interaction.options.getString('враги') ?? '', 'враги', { allowNames: false });
+    if (!ours.length) throw new UserError('Укажи хотя бы одного героя в поле «мои».');
+  } catch (err) {
+    if (!(err instanceof UserError)) throw err;
+    await interaction.reply({ content: err.message, flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  await interaction.deferReply();
+  console.log(`/сборка от ${interaction.user.tag}: ${ours.map((o) => o.hero.name).join(', ')} vs ${enemies.map((e) => e.hero.name).join(', ')}`);
+
+  const style = interaction.options.getString('style') || config.style;
+  const { text } = await makeBuild(ours, enemies, style);
+  const [first, ...rest] = splitMessage(text);
+  await interaction.editReply(first);
+  for (const message of rest) await interaction.followUp(message);
+}
+
+// Подсказки героев для последнего слова в списке: «Pudge, Ax» → «Pudge, Axe»
+export async function handleBuildAutocomplete(interaction) {
+  const { name, value } = interaction.options.getFocused(true);
+  const parts = value.split(',');
+  const current = parts.pop().trimStart();
+  const head = parts.length ? `${parts.map((s) => s.trim()).join(', ')}, ` : '';
+
+  const named = name === 'мои' ? current.match(/^([^=:]+)[=:](.*)$/) : null;
+  const prefix = named ? `${named[1].trim()}=` : '';
+  const query = normalizeName(named ? named[2] : current);
+
+  const choices = [];
+  // Имена наших игроков: набираешь «Ан» → «Антон=»
+  if (name === 'мои' && !named && query) {
+    for (const p of config.players) if (normalizeName(p.name).startsWith(query)) choices.push(`${p.name}=`);
+  }
+
+  const heroes = allHeroes();
+  const byAlias = Object.entries(ALIASES)
+    .filter(([key]) => query && key.startsWith(query))
+    .map(([, heroName]) => heroes.find((h) => h.norm === normalizeName(heroName)))
+    .filter(Boolean);
+  const starts = heroes.filter((h) => !query || h.norm.startsWith(query));
+  const includes = heroes.filter((h) => query && !h.norm.startsWith(query) && h.norm.includes(query));
+  for (const h of [...byAlias, ...starts, ...includes]) choices.push(h.name);
+
+  const unique = [...new Set(choices)]
+    .map((c) => (c.endsWith('=') ? `${head}${c}` : `${head}${prefix}${c}`))
+    .filter((v) => v.length <= 100)
+    .slice(0, MAX_CHOICES);
+  await interaction.respond(unique.map((v) => ({ name: v, value: v })));
+}

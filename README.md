@@ -41,6 +41,10 @@ npm start
 npm run test-match -- 9066099884
 ```
 
+## Команда /сборка
+
+`/сборка мои:Антон=Invoker, Pudge, Axe враги:Lion, Necrophos` — бот накидывает сборку под драфт. В поле `мои` до пяти героев вашей команды, перед героем можно через `=` написать имя игрока из `PLAYERS` (тогда бот учтёт его историю на этом герое). В поле `враги` до пяти героев противников, можно неполный драфт. При вводе работает автодополнение; допустимы сокращения (`wk`, `sf`, `инвокер`), список в `ALIASES` в `src/build.js`. Популярные предметы берутся из OpenDota (`/heroes/{id}/itemPopularity`), промпт лежит в `build-prompt.txt` (`BUILD_PROMPT_FILE`). Проверить без Discord: `npm run test-build -- "Антон=Invoker, Pudge" "Axe, Lion"`.
+
 ## Настройка Discord
 
 1. https://discord.com/developers/applications → New Application → Bot → **Reset Token**. Полученный токен запишите в `DISCORD_TOKEN`.

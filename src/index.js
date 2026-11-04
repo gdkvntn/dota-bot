@@ -2,6 +2,7 @@
 //   npm start                    — запустить бота
 //   npm run test-match -- <id>   — разобрать матч в консоли, без Discord
 //   npm run test-joke            — шутка про случайного игрока в консоли, без Discord
+//   npm run test-build -- "Антон=Invoker, Pudge" "Axe, Lion" — сборка под драфт в консоли
 import { config, requireConfig } from "./config.js";
 import { getParsedMatch, loadConstants } from "./opendota.js";
 import { buildMatchInfo, pickTracked } from "./match.js";
@@ -9,6 +10,7 @@ import { describeMatch } from "./describe.js";
 import { generateComment, generateJoke } from "./llm.js";
 import { resolveStyle } from "./styles.js";
 import { runBot } from "./bot.js";
+import { parseTeam, makeBuild } from "./build.js";
 import { loadState } from "./state.js";
 
 async function testMatch(matchId) {
@@ -41,7 +43,30 @@ async function testJoke() {
   console.log(`--- Шутка про ${target} (${style.key}, ${model}) ---\n${text}`);
 }
 
+async function testBuild(oursRaw, enemiesRaw) {
+  if (!oursRaw)
+    throw new Error(
+      'Использование: npm run test-build -- "Антон=Invoker, Pudge" "Axe, Lion"',
+    );
+  requireConfig("openrouterKey");
+  loadState();
+  await loadConstants();
+  const ours = parseTeam(oursRaw, "мои", { allowNames: true });
+  const enemies = parseTeam(enemiesRaw || "", "враги", { allowNames: false });
+  const { text, model, description } = await makeBuild(
+    ours,
+    enemies,
+    config.style,
+  );
+  console.log(`--- Данные для модели ---\n${description}\n`);
+  console.log(`--- Ответ (${model}, ${text.length} симв.) ---\n${text}`);
+}
+
 function pickMode() {
+  const buildArgIndex = process.argv.indexOf("--build");
+  if (buildArgIndex !== -1)
+    return () =>
+      testBuild(process.argv[buildArgIndex + 1], process.argv[buildArgIndex + 2]);
   const matchArgIndex = process.argv.indexOf("--match");
   if (matchArgIndex !== -1)
     return () => testMatch(Number(process.argv[matchArgIndex + 1]));

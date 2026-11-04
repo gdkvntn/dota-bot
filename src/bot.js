@@ -6,6 +6,7 @@ import { loadState } from './state.js';
 import { checkNewMatches } from './watcher.js';
 import { scheduleJokes } from './jokes.js';
 import { handleMatchCommand, matchCommand } from './commands.js';
+import { buildCommand, handleBuildAutocomplete, handleBuildCommand } from './build.js';
 
 export async function runBot() {
   requireConfig('discordToken', 'channelId', 'openrouterKey');
@@ -56,7 +57,7 @@ function startSchedule(task) {
 // Команды регистрируются на каждом сервере: так они появляются сразу, а не через час, как глобальные
 async function registerCommands(guild) {
   try {
-    await guild.commands.set([matchCommand.toJSON()]);
+    await guild.commands.set([matchCommand.toJSON(), buildCommand.toJSON()]);
     console.log(`Команды зарегистрированы на сервере «${guild.name}»`);
   } catch (err) {
     console.error(`Не удалось зарегистрировать команды на сервере «${guild.name}»:`, err.message);
@@ -64,11 +65,20 @@ async function registerCommands(guild) {
 }
 
 async function onInteraction(interaction) {
-  if (!interaction.isChatInputCommand() || interaction.commandName !== matchCommand.name) return;
+  if (interaction.isAutocomplete()) {
+    if (interaction.commandName === buildCommand.name) await handleBuildAutocomplete(interaction).catch(() => {});
+    return;
+  }
+  if (!interaction.isChatInputCommand()) return;
+  if (interaction.commandName === matchCommand.name) return runCommand(interaction, handleMatchCommand);
+  if (interaction.commandName === buildCommand.name) return runCommand(interaction, handleBuildCommand);
+}
+
+async function runCommand(interaction, handler) {
   try {
-    await handleMatchCommand(interaction);
+    await handler(interaction);
   } catch (err) {
-    console.error('Ошибка команды /match:', err);
+    console.error(`Ошибка команды /${interaction.commandName}:`, err);
     const reply = { content: 'Что-то сломалось, попробуй ещё раз позже 🤕' };
     await (interaction.deferred ? interaction.editReply(reply) : interaction.reply(reply)).catch(() => {});
   }
