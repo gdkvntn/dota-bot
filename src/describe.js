@@ -13,6 +13,7 @@ export function describeMatch(info, { history = false } = {}) {
     ...headerSection(info),
     ...trackedSection(info),
     ...(history ? historySection(info) : []),
+    ...personalSection(info),
     ...teamsSection(info),
     ...goldSection(info),
     ...timelineSection(info),
@@ -164,6 +165,78 @@ function timingsLine(d) {
     timings.push(`${item.name} на ${formatDuration(time)}`);
   }
   return timings.slice(0, 8).join(', ');
+}
+
+// --- Убийства и смерти наших игроков по времени (из kills_log разобранного реплея) ---
+
+const MULTIKILL_GAP = 18; // секунд между убийствами в одной серии (правило Dota)
+const DEATH_WINDOW = 300; // секунд — окно для «много смертей подряд»
+const MAX_DEATH_LIST = 20;
+
+function personalSection(info) {
+  if (!info.match) return [];
+  const lines = [];
+  for (const o of info.ours) {
+    if (!o.details) continue;
+    const deaths = deathLog(info, o.hero);
+    const kills = (o.details.kills_log || [])
+      .filter((k) => k.time >= 0 && heroByNpc(k.key))
+      .sort((a, b) => a.time - b.time);
+    const details = [...deathLines(info, o, deaths), ...killLines(kills)];
+    if (details.length) lines.push(`- ${o.player.name} (${o.hero}):`, ...details);
+  }
+  return section('Убийства и смерти наших игроков по времени (по логу убийств героев):', lines);
+}
+
+// Смерти героя: убийства всех игроков, где жертва — этот герой
+function deathLog(info, hero) {
+  return info.match.players
+    .flatMap((p) =>
+      (p.kills_log || [])
+        .filter((k) => k.time >= 0 && heroByNpc(k.key) === hero)
+        .map((k) => ({ time: k.time, killer: labelPlayer(info, p) })),
+    )
+    .sort((a, b) => a.time - b.time);
+}
+
+function deathLines(info, o, deaths) {
+  if (!deaths.length) return [];
+  const lines = [];
+
+  const list = deaths.slice(0, MAX_DEATH_LIST).map((d) => `[${formatDuration(d.time)}] ${d.killer}`);
+  const more = deaths.length > MAX_DEATH_LIST ? ` … и ещё ${deaths.length - MAX_DEATH_LIST}` : '';
+  const missing = o.stats.deaths > deaths.length ? ` (в логу ${deaths.length} из ${o.stats.deaths}, остальные — от крипов, башен и т.п.)` : '';
+  lines.push(`  Смерти от героев${missing}: ${list.join(', ')}${more}`);
+
+  // Накопленные смерти на круглых минутах: «к 20' — 10 смертей»
+  const marks = [];
+  for (let min = 10; min * 60 < info.duration; min += 10) {
+    marks.push(`к ${min}' — ${deaths.filter((d) => d.time < min * 60).length}`);
+  }
+  if (marks.length) lines.push(`  Накопленные смерти от героев: ${marks.join(', ')}`);
+
+  // Самый жирный фид: больше всего смертей в окне DEATH_WINDOW секунд
+  let best = { count: 0, start: 0 };
+  for (const d of deaths) {
+    const count = deaths.filter((x) => x.time >= d.time && x.time < d.time + DEATH_WINDOW).length;
+    if (count > best.count) best = { count, start: d.time };
+  }
+  if (best.count >= 3) lines.push(`  Пик фида: ${best.count} смертей за ${DEATH_WINDOW / 60} минут, начиная с ${formatDuration(best.start)}`);
+
+  return lines;
+}
+
+// Серии убийств с паузой не больше 18 секунд — трипл-килл и выше, с временем и жертвами
+function killLines(kills) {
+  const groups = [];
+  for (const k of kills) {
+    const last = groups.at(-1);
+    if (last && k.time - last.at(-1).time <= MULTIKILL_GAP) last.push(k);
+    else groups.push([k]);
+  }
+  return groups
+    .filter((g) => g.length >= 3)
+    .map((g) => `  ${MULTI_KILLS[g.length] || `${g.length}-килл`} на ${formatDuration(g[0].time)}: ${g.map((k) => heroByNpc(k.key)).join(', ')}`);
 }
 
 // --- Команды целиком (для сравнения) ---
