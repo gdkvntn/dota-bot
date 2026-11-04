@@ -3,6 +3,7 @@
 import { MessageFlags, SlashCommandBuilder } from 'discord.js';
 import { config } from './config.js';
 import { allHeroes, getItemPopularity, heroInfo, itemByKey, itemName, normalizeName } from './opendota.js';
+import { addItemEmojis } from './emojis.js';
 import { generateBuild } from './llm.js';
 import { splitMessage } from './report.js';
 import { resolveStyle, STYLES } from './styles.js';
@@ -224,7 +225,7 @@ export async function handleBuildCommand(interaction) {
 
   const style = interaction.options.getString('style') || config.style;
   const { text } = await makeBuild(ours, enemies, style);
-  const [first, ...rest] = splitMessage(text);
+  const [first, ...rest] = splitMessage(await addItemEmojis(text)); // иконки предметов — до нарезки на сообщения
   await interaction.editReply(first);
   for (const message of rest) await interaction.followUp(message);
 }

@@ -6,6 +6,7 @@ import { loadState } from './state.js';
 import { checkNewMatches } from './watcher.js';
 import { scheduleJokes } from './jokes.js';
 import { handleMatchCommand, matchCommand } from './commands.js';
+import { initItemEmojis } from './emojis.js';
 import { buildCommand, handleBuildAutocomplete, handleBuildCommand } from './build.js';
 
 export async function runBot() {
@@ -28,6 +29,7 @@ async function onReady(client) {
   console.log(`Проверка каждые ${config.intervalMin} мин, модели: ${config.models.join(', ')}`);
 
   for (const guild of client.guilds.cache.values()) await registerCommands(guild);
+  await initItemEmojis(client);
 
   const channel = await client.channels.fetch(config.channelId);
   if (!channel?.isTextBased()) throw new Error(`Канал ${config.channelId} не найден или не текстовый`);

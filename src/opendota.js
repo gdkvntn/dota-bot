@@ -98,7 +98,7 @@ export async function loadConstants() {
     heroesByNpc[hero.name] = hero.localized_name;
   }
   for (const [key, item] of Object.entries(items)) {
-    itemsByKey[key] = { name: item.dname || key, cost: item.cost || 0 };
+    itemsByKey[key] = { name: item.dname || key, cost: item.cost || 0, img: item.img || null };
   }
   for (const [id, key] of Object.entries(itemIds)) {
     itemsById[id] = itemsByKey[key]?.name || key;
@@ -109,6 +109,7 @@ export const heroName = (id) => heroesById[id] || `герой #${id}`;
 export const heroByNpc = (npc) => heroesByNpc[npc] || null;
 export const itemName = (id) => (id ? itemsById[id] || null : null);
 export const itemByKey = (key) => itemsByKey[key] || null;
+export const allItems = () => Object.entries(itemsByKey).map(([key, item]) => ({ key, ...item }));
 
 // 'Anti-Mage' → 'antimage': для поиска героя по введённому тексту
 export const normalizeName = (text) => String(text).toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
