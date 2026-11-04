@@ -2,15 +2,17 @@
 // Каждый раздел — отдельная функция, возвращающая массив строк (пустой, если данных нет).
 import { heroByNpc, heroName, itemByKey } from './opendota.js';
 import { formatDuration, isRadiantSlot, sideName } from './match.js';
+import { historySection } from './history.js';
 
 const pct = (x) => `${Math.round(x * 100)}%`;
 const short = (n) => (Math.abs(n) >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
 const signed = (n) => `${n > 0 ? '+' : ''}${short(n)}`;
 
-export function describeMatch(info) {
+export function describeMatch(info, { history = false } = {}) {
   return [
     ...headerSection(info),
     ...trackedSection(info),
+    ...(history ? historySection(info) : []),
     ...teamsSection(info),
     ...goldSection(info),
     ...timelineSection(info),

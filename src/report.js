@@ -4,17 +4,20 @@ import { buildMatchInfo } from './match.js';
 import { describeMatch } from './describe.js';
 import { generateComment } from './llm.js';
 import { resolveStyle } from './styles.js';
+import { recordMatch } from './history.js';
 
 const DISCORD_LIMIT = 2000;
 
 /**
  * Возвращает ответ модели, нарезанный на сообщения Discord.
- * options.match — уже загруженные детали матча, options.style — стиль вместо STYLE из .env.
+ * options.match — уже загруженные детали матча, options.style — стиль вместо STYLE из .env,
+ * options.record — автопост: учесть историю игроков в разборе и записать в неё этот матч.
  */
-export async function makeReport(matchId, tracked, { match = null, style = config.style } = {}) {
+export async function makeReport(matchId, tracked, { match = null, style = config.style, record = false } = {}) {
   const info = await buildMatchInfo(matchId, tracked, match);
   const { key, text: styleText } = resolveStyle(style);
-  const { text, model } = await generateComment(describeMatch(info), styleText);
+  const { text, model } = await generateComment(describeMatch(info, { history: record }), styleText);
+  if (record) recordMatch(info); // после успешного ответа модели; повтор того же матча в историю не задвоится
 
   console.log(`Матч ${matchId}: ответ от ${model}, стиль ${key}, ${text.length} симв.`);
   return splitMessage(text);

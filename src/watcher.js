@@ -2,6 +2,7 @@
 import { config } from './config.js';
 import { getLatestMatch } from './opendota.js';
 import { makeReport } from './report.js';
+import { backfillHistory } from './history.js';
 import * as state from './state.js';
 
 const MAX_ATTEMPTS = 3; // после стольких неудач матч пропускается
@@ -27,6 +28,7 @@ async function findNewMatches() {
     if (!latest) continue;
 
     const known = state.getLastMatch(player.id);
+    await backfillHistory(player, known ?? latest.match_id); // только если истории ещё нет
     if (known === null) {
       // Первый запуск: запоминаем, о старой игре не пишем
       state.setLastMatch(player.id, latest.match_id);
@@ -52,7 +54,7 @@ async function postMatch(channel, matchId, tracked) {
   console.log(`Новый матч ${matchId}: ${tracked.map((t) => t.player.name).join(', ')}`);
 
   try {
-    for (const message of await makeReport(matchId, tracked)) await channel.send(message);
+    for (const message of await makeReport(matchId, tracked, { record: true })) await channel.send(message);
   } catch (err) {
     const attempt = (failures.get(matchId) || 0) + 1;
     failures.set(matchId, attempt);

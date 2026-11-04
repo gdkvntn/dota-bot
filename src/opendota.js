@@ -34,6 +34,9 @@ export async function getLatestMatch(accountId) {
   return latest ?? null;
 }
 
+/** Последние ~20 матчей игрока (краткие записи, новые первыми). */
+export const getRecentMatches = (accountId) => request(`/players/${accountId}/recentMatches`);
+
 export const getMatch = (matchId) => request(`/matches/${matchId}`);
 
 const isParsed = (match) => match?.version != null;

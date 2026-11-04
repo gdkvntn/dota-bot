@@ -11,6 +11,7 @@ let state = {
   posted: [], // матчи, о которых уже написали (если в матче двое наших — пост один)
   lastJokeAt: null, // когда была последняя шутка по расписанию (мс)
   recentJokes: [], // последние шутки — чтобы модель не повторялась
+  history: {}, // accountId → [{ matchId, hero, win, kills, deaths, assists, ... }] — все матчи, без ограничений
 };
 
 export function loadState() {
@@ -48,4 +49,14 @@ export const getRecentJokes = () => state.recentJokes;
 export function addJoke(text) {
   state.lastJokeAt = Date.now();
   state.recentJokes = [...state.recentJokes, text].slice(-MAX_RECENT_JOKES);
+}
+
+export const getHistory = (accountId) => state.history[accountId] ?? [];
+
+/** Добавляет матч в историю игрока. Повторно один и тот же матч не пишется. */
+export function addHistory(accountId, entry) {
+  const list = (state.history[accountId] ??= []);
+  if (list.some((m) => m.matchId === entry.matchId)) return;
+  list.push(entry);
+  list.sort((a, b) => a.matchId - b.matchId); // всегда от старых к новым
 }
