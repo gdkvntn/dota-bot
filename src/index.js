@@ -2,6 +2,7 @@
 //   npm start                    — запустить бота
 //   npm run test-match -- <id>   — разобрать матч в консоли, без Discord
 //   npm run test-joke            — шутка про случайного игрока в консоли, без Discord
+//   npm run test-live            — проверить live-матч через OpenDota и STRATZ (запускать во время игры)
 //   npm run test-build -- "Антон=Invoker, Pudge" "Axe, Lion" — сборка под драфт в консоли
 import { config, requireConfig } from "./config.js";
 import { getParsedMatch, loadConstants } from "./opendota.js";
@@ -12,6 +13,7 @@ import { resolveStyle } from "./styles.js";
 import { runBot } from "./bot.js";
 import { parseTeam, makeBuild } from "./build.js";
 import { loadState } from "./state.js";
+import { probeLive } from "./live.js";
 
 async function testMatch(matchId) {
   if (!Number.isInteger(matchId))
@@ -62,7 +64,13 @@ async function testBuild(oursRaw, enemiesRaw) {
   console.log(`--- Ответ (${model}, ${text.length} симв.) ---\n${text}`);
 }
 
+async function testLive() {
+  await loadConstants();
+  console.log((await probeLive()).replaceAll("**", ""));
+}
+
 function pickMode() {
+  if (process.argv.includes("--live")) return testLive;
   const buildArgIndex = process.argv.indexOf("--build");
   if (buildArgIndex !== -1)
     return () =>

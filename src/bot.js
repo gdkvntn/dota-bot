@@ -8,6 +8,7 @@ import { scheduleJokes } from './jokes.js';
 import { handleMatchCommand, matchCommand } from './commands.js';
 import { initItemEmojis } from './emojis.js';
 import { buildCommand, handleBuildAutocomplete, handleBuildCommand } from './build.js';
+import { handleLiveCommand, liveCommand } from './live.js';
 
 export async function runBot() {
   requireConfig('discordToken', 'channelId', 'openrouterKey');
@@ -59,7 +60,7 @@ function startSchedule(task) {
 // Команды регистрируются на каждом сервере: так они появляются сразу, а не через час, как глобальные
 async function registerCommands(guild) {
   try {
-    await guild.commands.set([matchCommand.toJSON(), buildCommand.toJSON()]);
+    await guild.commands.set([matchCommand.toJSON(), buildCommand.toJSON(), liveCommand.toJSON()]);
     console.log(`Команды зарегистрированы на сервере «${guild.name}»`);
   } catch (err) {
     console.error(`Не удалось зарегистрировать команды на сервере «${guild.name}»:`, err.message);
@@ -74,6 +75,7 @@ async function onInteraction(interaction) {
   if (!interaction.isChatInputCommand()) return;
   if (interaction.commandName === matchCommand.name) return runCommand(interaction, handleMatchCommand);
   if (interaction.commandName === buildCommand.name) return runCommand(interaction, handleBuildCommand);
+  if (interaction.commandName === liveCommand.name) return runCommand(interaction, handleLiveCommand);
 }
 
 async function runCommand(interaction, handler) {

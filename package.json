@@ -8,7 +8,8 @@
     "start": "node src/index.js",
     "test-match": "node src/index.js --match",
     "test-joke": "node src/index.js --joke",
-    "test-build": "node src/index.js --build"
+    "test-build": "node src/index.js --build",
+    "test-live": "node src/index.js --live"
   },
   "engines": {
     "node": ">=18.17"

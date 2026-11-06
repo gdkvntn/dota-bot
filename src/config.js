@@ -51,6 +51,7 @@ export const config = {
     .filter(Boolean),
   style: str('STYLE', 'random'),
   maxChars: Math.min(num('MAX_CHARS', 5000), 12000),
+  buildMaxChars: Math.min(num('BUILD_MAX_CHARS', 700), 2000), // длина ответа /сборка
   temperature: num('TEMPERATURE', 1.0),
   players: parsePlayers(str('PLAYERS')),
   // Имена (через запятую), над которыми бот шутит всегда
@@ -66,6 +67,7 @@ export const config = {
   promptFile: str('PROMPT_FILE', './prompt.txt'),
   jokePromptFile: str('JOKE_PROMPT_FILE', './joke-prompt.txt'),
   buildPromptFile: str('BUILD_PROMPT_FILE', './build-prompt.txt'),
+  stratzToken: str('STRATZ_TOKEN', ''), // нужен только для /test-live
 };
 
 export function requireConfig(...keys) {
