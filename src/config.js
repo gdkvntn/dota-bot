@@ -67,6 +67,7 @@ export const config = {
   promptFile: str('PROMPT_FILE', './prompt.txt'),
   jokePromptFile: str('JOKE_PROMPT_FILE', './joke-prompt.txt'),
   buildPromptFile: str('BUILD_PROMPT_FILE', './build-prompt.txt'),
+  stratzToken: str('STRATZ_TOKEN', ''), // нужен только для /test-live
 };
 
 export function requireConfig(...keys) {
