@@ -2,7 +2,7 @@
 // бот подтягивает популярные предметы героев и просит модель накидать сборку под драфт.
 import { MessageFlags, SlashCommandBuilder } from 'discord.js';
 import { config } from './config.js';
-import { allHeroes, getItemPopularity, heroInfo, itemByKey, itemName, normalizeName } from './opendota.js';
+import { allHeroes, allItems, getItemPopularity, heroInfo, itemByKey, itemName, normalizeName } from './opendota.js';
 import { addItemEmojis } from './emojis.js';
 import { generateBuild } from './llm.js';
 import { splitMessage } from './report.js';
@@ -91,9 +91,9 @@ export function parseTeam(raw, label, { allowNames }) {
 
 const PHASES = [
   ['start_game_items', 'старт', 6],
-  ['early_game_items', 'ранняя игра', 5],
-  ['mid_game_items', 'середина', 5],
-  ['late_game_items', 'поздняя игра', 5],
+  ['early_game_items', 'ранняя игра', 8],
+  ['mid_game_items', 'середина', 8],
+  ['late_game_items', 'поздняя игра', 8],
 ];
 const SKIP_ITEMS = /^(town portal scroll|recipe)/i;
 
@@ -126,11 +126,15 @@ function playerHeroLine(player, heroName) {
   return `в истории на этом герое: ${games.length} игр, побед ${wins}, в среднем ${deaths} смертей`;
 }
 
+const traits = (heroId) => {
+  const info = heroInfo(heroId);
+  return [info?.attack, info?.attr, info?.roles.join('/')].filter(Boolean).join(', ');
+};
+
 async function playerBlock({ who, hero }) {
   const player = findPlayer(who);
   const label = player ? player.name : who || 'Союзник';
-  const info = heroInfo(hero.id);
-  const lines = [`- ${label} — ${hero.name} (${[info?.attack, info?.attr, info?.roles.join('/')].filter(Boolean).join(', ')})`];
+  const lines = [`- ${label} — ${hero.name} (${traits(hero.id)})`];
   if (player) lines.push(`  ${playerHeroLine(player, hero.name)}`);
 
   try {
@@ -146,23 +150,33 @@ async function playerBlock({ who, hero }) {
   return lines;
 }
 
-function enemyBlock(enemies) {
-  if (!enemies.length) return [];
-  const infos = enemies.map((e) => heroInfo(e.hero.id));
+// Состав команды цифрами (считает код, чтобы модель не ошибалась в счёте)
+function compositionLine(team) {
+  const infos = team.map((e) => heroInfo(e.hero.id));
   const count = (role) => infos.filter((i) => i?.roles.includes(role)).length;
   const attr = (a) => infos.filter((i) => i?.attr === a).length;
-
-  const lines = enemies.map((e, i) => {
-    const info = infos[i];
-    return `- ${e.hero.name} (${[info?.attack, info?.attr, info?.roles.join('/')].filter(Boolean).join(', ')})`;
-  });
-  lines.push(
-    `Сводка по врагам (посчитано кодом; героев: ${enemies.length}): дизейблеров ${count('Disabler')}, побегов ${count('Escape')}, ` +
-      `нюкеров ${count('Nuker')}, инициаторов ${count('Initiator')}, керри ${count('Carry')}, ` +
-      `ренжей ${infos.filter((i) => i?.attack === 'Ranged').length} из ${enemies.length}; ` +
-      `атрибуты: str ${attr('str')}, agi ${attr('agi')}, int ${attr('int')}, универсалов ${attr('all')}`,
+  return (
+    `героев ${team.length}: дизейблеров ${count('Disabler')}, побегов ${count('Escape')}, нюкеров ${count('Nuker')}, ` +
+    `инициаторов ${count('Initiator')}, керри ${count('Carry')}, саппортов ${count('Support')}, пушеров ${count('Pusher')}, ` +
+    `ренжей ${infos.filter((i) => i?.attack === 'Ranged').length} из ${team.length}; ` +
+    `атрибуты: str ${attr('str')}, agi ${attr('agi')}, int ${attr('int')}, универсалов ${attr('all')}`
   );
-  return lines;
+}
+
+function enemyBlock(enemies) {
+  if (!enemies.length) return [];
+  return [
+    ...enemies.map((e) => `- ${e.hero.name} (${traits(e.hero.id)})`),
+    `Сводка по врагам (посчитано кодом): ${compositionLine(enemies)}`,
+  ];
+}
+
+// Названия реальных предметов: модель пишет их ровно так, и бот подставляет иконки
+function itemCatalog() {
+  const names = allItems()
+    .filter((i) => i.img && i.cost > 0 && !i.key.startsWith('recipe') && !/recipe/i.test(i.name)) // без рецептов и нейтральных (у них цена 0)
+    .map((i) => i.name);
+  return [...new Set(names)].sort().join(', ');
 }
 
 // Сборка нужна только тем союзникам, у которых указано имя («Антон=Invoker»).
@@ -179,6 +193,19 @@ async function describeDraft(ours, enemies) {
   const contextLine = context.length
     ? ['', `Остальные союзники (только контекст драфта, сборку им НЕ давать): ${context.map((o) => o.hero.name).join(', ')}`]
     : [];
+
+  // Оценка пика имеет смысл, только когда известны обе команды целиком
+  const fullDraft = ours.length === MAX_TEAM && enemies.length === MAX_TEAM;
+  const rating = fullDraft
+    ? [
+        '',
+        'Оценка пика: НУЖНА (известны все 10 героев).',
+        'Наша команда целиком:',
+        ...ours.map((o) => `- ${o.hero.name} (${traits(o.hero.id)})`),
+        `Сводка по нашей команде (посчитано кодом): ${compositionLine(ours)}`,
+      ]
+    : ['', 'Оценка пика: НЕ нужна (драфт неполный), не пиши её.'];
+
   return [
     'Сборку нужно дать этим игрокам:',
     ...players,
@@ -186,6 +213,9 @@ async function describeDraft(ours, enemies) {
     '',
     foes.length ? 'Враги:' : 'Враги: пока не известны (драфт идёт), сборку давай без привязки к вражескому составу.',
     ...foes,
+    ...rating,
+    '',
+    `Допустимые названия предметов (пиши ровно так): ${itemCatalog()}`,
   ].join('\n');
 }
 
