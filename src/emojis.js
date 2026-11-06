@@ -5,7 +5,7 @@ import { PNG } from 'pngjs';
 import { allItems } from './opendota.js';
 
 const CDN = 'https://cdn.cloudflare.steamstatic.com';
-const MAX_NEW_PER_REPLY = 15; // сколько иконок можно загрузить за один ответ
+const MAX_NEW_PER_REPLY = 30; // сколько иконок можно загрузить за один ответ
 const FETCH_TIMEOUT_MS = 15_000;
 const MIN_NAME_LENGTH = 4; // слишком короткие названия слишком легко совпадают с обычными словами
 
