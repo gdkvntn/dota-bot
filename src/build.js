@@ -126,7 +126,7 @@ function playerHeroLine(player, heroName) {
   return `в истории на этом герое: ${games.length} игр, побед ${wins}, в среднем ${deaths} смертей`;
 }
 
-async function allyBlock({ who, hero }) {
+async function playerBlock({ who, hero }) {
   const player = findPlayer(who);
   const label = player ? player.name : who || 'Союзник';
   const info = heroInfo(hero.id);
@@ -165,12 +165,24 @@ function enemyBlock(enemies) {
   return lines;
 }
 
+// Сборка нужна только тем союзникам, у которых указано имя («Антон=Invoker»).
+// Если имён нет совсем, сборку получают все. Остальные союзники нужны только как контекст драфта.
+export function splitAllies(ours) {
+  const named = ours.filter((o) => o.who);
+  return named.length ? { builds: named, context: ours.filter((o) => !o.who) } : { builds: ours, context: [] };
+}
+
 async function describeDraft(ours, enemies) {
-  const allies = (await Promise.all(ours.map(allyBlock))).flat();
+  const { builds, context } = splitAllies(ours);
+  const players = (await Promise.all(builds.map(playerBlock))).flat();
   const foes = enemyBlock(enemies);
+  const contextLine = context.length
+    ? ['', `Остальные союзники (только контекст драфта, сборку им НЕ давать): ${context.map((o) => o.hero.name).join(', ')}`]
+    : [];
   return [
-    'Наша команда (по этим героям нужна сборка):',
-    ...allies,
+    'Сборку нужно дать этим игрокам:',
+    ...players,
+    ...contextLine,
     '',
     foes.length ? 'Враги:' : 'Враги: пока не известны (драфт идёт), сборку давай без привязки к вражескому составу.',
     ...foes,

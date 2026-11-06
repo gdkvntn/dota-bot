@@ -65,7 +65,7 @@ export function generateComment(matchDescription, style) {
 
 /** Сборка предметов под пики по build-prompt.txt. */
 export function generateBuild(description, style) {
-  const system = loadPrompt(config.buildPromptFile, { style, max_chars: String(config.maxChars) });
+  const system = loadPrompt(config.buildPromptFile, { style, max_chars: String(config.buildMaxChars) });
   return complete(system, `Данные драфта:\n\n${description}`);
 }
 
